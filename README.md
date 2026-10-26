@@ -44,6 +44,26 @@ This port was created using the [Xbox XBE Recomp](https://github.com/TGP482/Xbox
 - **Skip Intro** - Skips the intro logos.
 - **Pause On Focus Loss** - Pauses the game and its sound while the window is in the background or minimized.
 
+### Cheats & Enhancements
+Built-in cheats accessible through the in-game options menu and the F10 overlay:
+- **Weapons**
+  - **Infinite Ammo** - Magazine and reserve ammunition never decrease.
+  - **Infinite Grenades** - Throwing grenades preserves the grenade count.
+  - **Rapid Fire** - Multiplies the player's rate of fire up to 4x.
+  - **No Recoil** - Eliminates weapon kick and camera view shake.
+  - **No Spread** - Eliminates bullet spread for pin-point accuracy (shotguns retain their natural spread).
+  - **Infinite Range** - Bullets travel instantaneously with virtually infinite effective range.
+- **Player**
+  - **God Mode** - Complete invulnerability with continuous full health.
+  - **One-Hit Kill** - Any bullet hit from the player instantly eliminates the target.
+  - **ESP Lines** - Tactical visual overlay showing directional snaplines, bounding boxes, and head indicators for living enemies.
+  - **Aimbot** - Automatically tracks and aligns the aim to the nearest enemy while aiming down sights (ADS).
+- **Game & Progression**
+  - **Game Speed** - Custom gameplay speed multiplier (10% to 200%) without speeding up menus or video cutscenes.
+  - **Unlock All Missions** - Unlocks every mission on all difficulties without modifying save files.
+  - **Unlock Black Ops** - Unlocks Black Ops difficulty for all currently open missions.
+  - **Weapon Spawner** - Spawn any of the game's 17 weapons into the player's loadout and refill ammunition at any time via the F10 menu.
+
 ### Miscellaneous
 - **Custom Menu Cursor** - Place a `cursor.png` (or `cursor.dds`) beside the exe to replace the Windows arrow in the game's menus.
 
