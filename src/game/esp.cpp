@@ -1,6 +1,7 @@
 // The cheats page's ESP LINES: each living enemy gets a box round it and a line to it from the bottom of the screen,
 // drawn over the finished frame with the view the scene was drawn with. AIMBOT: while the player aims in the view
 // turns to the body of the living enemy nearest the crosshair
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -19,6 +20,7 @@ namespace {
 // velocity of. The world is Y up: that update zeroes Y for the speed along the ground
 constexpr uint32_t kCharKind = 0xC4;
 constexpr uint32_t kCharPosition = 0xA0;
+constexpr uint32_t kCharHealth = 0x2F0;
 constexpr uint32_t kCharDying = 0x384;
 constexpr uint32_t kEnemyKind = 1;
 
@@ -31,12 +33,19 @@ constexpr uint32_t kPlayerZoom = 0x2A4;
 constexpr float kHeight = 1.8f;      // world units are metres: the near plane is 0.08
 constexpr float kBoxWidth = 0.45f;   // of the box's height
 constexpr float kNear = 0.08f;       // clip w nearer than this is behind the camera
-constexpr float kThickness = 1.5f;   // lines of a 480 frame
 constexpr float kChest = 1.2f;       // above the feet, where the aimbot aims: the body, a bigger hit than the head
 constexpr float kCone = 30.0f;       // degrees from the crosshair an enemy is taken in
 constexpr float kPull = 1.0f;        // of the turn to the target, a frame
 constexpr float kDegrees = 180.0f / 3.14159265f;
-constexpr float kColour[4] = {1.0f, 0.125f, 0.125f, 1.0f};  // rgba
+
+// Color palette: modern tactical cyber-red with headshot amber highlight
+struct Color {
+    float r, g, b, a;
+};
+constexpr Color kColBox = {1.0f, 0.22f, 0.28f, 0.88f};        // Crisp neon tactical red for brackets
+constexpr Color kColHead = {1.0f, 0.72f, 0.20f, 0.95f};       // Bright tactical amber pip on head
+constexpr Color kColSnapBase = {1.0f, 0.25f, 0.30f, 0.12f};   // Soft translucent base (keeps gun model visible)
+constexpr Color kColSnapEnd = {1.0f, 0.25f, 0.30f, 0.65f};    // Focused tracer target pointer
 
 // an enemy is drawn while its update ran this recently: none once the game pauses, no flicker between ticks
 constexpr auto kSeen = std::chrono::milliseconds(250);
@@ -60,7 +69,7 @@ constexpr uint32_t kTriangles = 0xD5A00;
 struct Vertex {
     float x, y;
 };
-constexpr size_t kSegments = 5;  // the line and the box's four sides
+constexpr size_t kSegments = 16;  // tracer + 8 brackets + head indicator with generous headroom
 constexpr size_t kMaxVertices = kMaxEnemies * kSegments * 6;
 
 void Remember(uint32_t who) {
@@ -101,14 +110,32 @@ bool Project(const float p[3], float vx, float vy, float vw, float vh, float out
     return true;
 }
 
-// a segment as a quad of two triangles, its width across it
-Vertex* Segment(Vertex* v, float x0, float y0, float x1, float y1, float width) {
+// a solid color segment as a quad of two triangles, its width across it
+Vertex* Segment(Vertex* v, Color*& c, float x0, float y0, float x1, float y1, float width, const Color& col) {
     float dx = x1 - x0, dy = y1 - y0;
     float length = std::sqrt(dx * dx + dy * dy);
     if (!(length > 0)) return v;
     float nx = -dy / length * width * 0.5f, ny = dx / length * width * 0.5f;
     const float corner[4][2] = {{x0 + nx, y0 + ny}, {x0 - nx, y0 - ny}, {x1 + nx, y1 + ny}, {x1 - nx, y1 - ny}};
-    for (int i : {0, 1, 2, 2, 1, 3}) *v++ = {corner[i][0], corner[i][1]};
+    for (int i : {0, 1, 2, 2, 1, 3}) {
+        *v++ = {corner[i][0], corner[i][1]};
+        *c++ = col;
+    }
+    return v;
+}
+
+// an opacity gradient segment (col0 at x0,y0 -> col1 at x1,y1)
+Vertex* GradientSegment(Vertex* v, Color*& c, float x0, float y0, float x1, float y1, float width, const Color& col0, const Color& col1) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float length = std::sqrt(dx * dx + dy * dy);
+    if (!(length > 0)) return v;
+    float nx = -dy / length * width * 0.5f, ny = dx / length * width * 0.5f;
+    const float corner[4][2] = {{x0 + nx, y0 + ny}, {x0 - nx, y0 - ny}, {x1 + nx, y1 + ny}, {x1 - nx, y1 - ny}};
+    const Color cols[4] = {col0, col0, col1, col1};
+    for (int i : {0, 1, 2, 2, 1, 3}) {
+        *v++ = {corner[i][0], corner[i][1]};
+        *c++ = cols[i];
+    }
     return v;
 }
 
@@ -158,32 +185,92 @@ void DrawEsp(X86Context& ctx, float unit) {
     float vw = float(R32(viewport + 8)), vh = float(R32(viewport + 12));
     static const uint32_t buffer = mem::AllocSystem(kMaxVertices * sizeof(Vertex), 16);
     static const uint32_t offset = mem::AllocSystem(8, 16);
-    static const uint32_t colours = [] {
-        uint32_t c = mem::AllocSystem(kMaxVertices * sizeof(kColour), 16);
-        for (size_t i = 0; i < kMaxVertices; i++) std::memcpy(HostPtr(c + i * sizeof(kColour)), kColour, sizeof(kColour));
-        return c;
-    }();
+    static const uint32_t colours = mem::AllocSystem(kMaxVertices * sizeof(Color), 16);
+
     Vertex* first = static_cast<Vertex*>(HostPtr(buffer));
+    Color* first_c = static_cast<Color*>(HostPtr(colours));
     Vertex* v = first;
-    float width = kThickness * unit;
+    Color* c = first_c;
+
+    // Fine, razor-sharp lines across all resolutions:
+    // Snapline: thin 1.0px tracer with smooth opacity gradient
+    // Box: 1.0px (or 1.25px on high-DPI displays)
+    float line_width = (unit > 2.2f) ? 1.25f : 1.0f;
+    float snap_width = 1.0f;
+
+    // Reticle safe-zone: prevent snaplines from cutting across the player's crosshair and weapon sight
+    float cx = vx + vw * 0.5f;
+    float cy = vy + vh * 0.5f;
+    float deadzone = 45.0f * unit;   // targets within deadzone: snapline is completely omitted
+    float fadezone = 95.0f * unit;   // targets entering combat focus: snapline softly dissolves
+
     auto now = std::chrono::steady_clock::now();
     size_t kept = 0;
     for (size_t i = 0; i < g_count; i++) {
         uint32_t who = g_seen[i].who;
         if (now - g_seen[i].at > kSeen || R32(who + kCharKind) != kEnemyKind || R32(who + kCharDying)) continue;
+        if (G<float>(who + kCharHealth) <= 0.0f) continue;
+
         g_seen[kept++] = g_seen[i];
+        if (v + 72 > first + kMaxVertices) continue;
+
         const float* at = &G<float>(who + kCharPosition);
         float feet[3] = {at[0], at[1], at[2]};
         float head[3] = {at[0], at[1] + kHeight, at[2]};
         float f[2], h[2];
         if (!Project(feet, vx, vy, vw, vh, f) || !Project(head, vx, vy, vw, vh, h)) continue;
-        float half = (f[1] - h[1]) * kBoxWidth * 0.5f;
+
+        float box_h = f[1] - h[1];
+        if (box_h <= 0.0f) continue;
+        float half = box_h * kBoxWidth * 0.5f;
         float left = f[0] - half, right = f[0] + half;
-        v = Segment(v, vx + vw * 0.5f, vy + vh, f[0], f[1], width);
-        v = Segment(v, left, h[1], right, h[1], width);
-        v = Segment(v, left, f[1], right, f[1], width);
-        v = Segment(v, left, h[1], left, f[1], width);
-        v = Segment(v, right, h[1], right, f[1], width);
+        float box_w = right - left;
+        if (box_w <= 0.0f) continue;
+
+        // 1. Crosshair obstruction check: distance of target center to reticle
+        float target_center_x = f[0];
+        float target_center_y = (h[1] + f[1]) * 0.5f;
+        float dist_to_reticle = std::hypot(target_center_x - cx, target_center_y - cy);
+
+        // Snapline: only renders if outside immediate crosshair focus, with smooth opacity gradient
+        if (dist_to_reticle > deadzone) {
+            float fade = (dist_to_reticle < fadezone) ? ((dist_to_reticle - deadzone) / (fadezone - deadzone)) : 1.0f;
+            Color col_base = kColSnapBase;
+            Color col_end = kColSnapEnd;
+            col_base.a *= fade;
+            col_end.a *= fade;
+            v = GradientSegment(v, c, cx, vy + vh - 2.0f, f[0], f[1], snap_width, col_base, col_end);
+        }
+
+        // 2. Head Indicator: small sleek target pip at head position for rapid acquisition
+        float pip_sz = (box_h > 35.0f) ? 1.5f : 1.0f;
+        v = Segment(v, c, f[0] - pip_sz, h[1], f[0] + pip_sz, h[1], pip_sz * 2.0f, kColHead);
+
+        // 3. Tactical corner brackets (or clean minimal box for distant targets)
+        float cw = std::clamp(box_w * 0.25f, 3.5f, 16.0f);
+        float ch = std::clamp(box_h * 0.18f, 3.5f, 16.0f);
+
+        if (box_h < 22.0f || cw * 2.0f >= box_w || ch * 2.0f >= box_h) {
+            // Distant target: clean crisp thin full box
+            v = Segment(v, c, left, h[1], right, h[1], line_width, kColBox);
+            v = Segment(v, c, left, f[1], right, f[1], line_width, kColBox);
+            v = Segment(v, c, left, h[1], left, f[1], line_width, kColBox);
+            v = Segment(v, c, right, h[1], right, f[1], line_width, kColBox);
+        } else {
+            // Tactical corner brackets [ ]
+            // Top-left
+            v = Segment(v, c, left, h[1], left + cw, h[1], line_width, kColBox);
+            v = Segment(v, c, left, h[1], left, h[1] + ch, line_width, kColBox);
+            // Top-right
+            v = Segment(v, c, right, h[1], right - cw, h[1], line_width, kColBox);
+            v = Segment(v, c, right, h[1], right, h[1] + ch, line_width, kColBox);
+            // Bottom-left
+            v = Segment(v, c, left, f[1], left + cw, f[1], line_width, kColBox);
+            v = Segment(v, c, left, f[1], left, f[1] - ch, line_width, kColBox);
+            // Bottom-right
+            v = Segment(v, c, right, f[1], right - cw, f[1], line_width, kColBox);
+            v = Segment(v, c, right, f[1], right, f[1] - ch, line_width, kColBox);
+        }
     }
     g_count = kept;
     if (v == first) return;

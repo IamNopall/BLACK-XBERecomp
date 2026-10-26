@@ -1,6 +1,8 @@
 // The cheats page's god mode, one-hit kill and infinite grenades. The rest live where the game
 // already has a hook: infinite ammo, rapid fire and no recoil with the weapon's, game speed with the frame time
 #include <algorithm>
+#include <cmath>
+#include <string>
 
 #include "common/options.h"
 #include "game/layout.h"
@@ -56,6 +58,44 @@ void Spare(const Doomed& kept) {
 
 bool g_invulnerable;  // the flag is ours, cleared when god mode goes off
 
+bool IsShotgun(uint32_t shot, uint32_t weapon) {
+    if (shot) {
+        // 1. Pellet count: shotguns in Black fire multiple projectiles per shell (e.g. 8-10 pellets)
+        uint32_t proj_def = R32(shot + 0x0C);
+        if (proj_def && R32(proj_def) > 1) return true;
+
+        // 2. Ammunition type 6: 12 gauge shotgun shells
+        uint32_t mag_data = R32(shot + 0x08);
+        if (mag_data && R32(mag_data + 0x64) == 6) return true;
+    }
+    if (weapon) {
+        // 3. Weapon manager table lookup for shotgun weapon codes (SHG, RM1, SH5, RM5)
+        uint32_t mgr = R32(0x002D12D0);
+        uint32_t table = mgr ? R32(mgr) : 0;
+        if (table) {
+            uint32_t entries = R32(table + 4);
+            uint8_t count = G<uint8_t>(table + 1);
+            uint8_t type = G<uint8_t>(weapon);
+            if (entries && type < count) {
+                uint32_t entry = entries + type * 0x20;
+                uint64_t key = R32(entry) | (uint64_t(R32(entry + 4)) << 32);
+                char s[13] = {};
+                for (int i = 11; i >= 0; i--) {
+                    int c = int(key % 40);
+                    key /= 40;
+                    s[i] = c == 0 ? ' ' : c == 1 ? '-' : c == 2 ? '/' : c < 13 ? char('0' + c - 3) : c < 39 ? char('A' + c - 13) : '_';
+                }
+                std::string name = s;
+                if (name.find("SHG") != std::string::npos || name.find("RM1") != std::string::npos ||
+                    name.find("SH5") != std::string::npos || name.find("RM5") != std::string::npos) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
 }  // namespace
 
 // The player's update, a frame (ecx the player, its class's own): god mode fills the health and holds the flag
@@ -97,3 +137,97 @@ X86_FUNC(sub_001E8830) {
     __imp__sub_001E8830(ctx, base);
     if (keep && G<uint16_t>(me + kCharGrenades) < grenades) G<uint16_t>(me + kCharGrenades) = grenades;
 }
+
+// Bullet trajectory / spread calculation (esi shot, edx is_player, edi out normalized dir, [esp+4] &origin, ret 0x4)
+// When no spread is active for the player, computes straight direction without any random deviation
+X86_EXTERN_FUNC(__imp__sub_001CEF40);
+X86_FUNC(sub_001CEF40) {
+    uint32_t shot = ctx.esi;
+    uint32_t weapon = shot ? R32(shot + 4) : 0;
+    bool is_player = (ctx.edx & 0xFF) != 0 || (weapon && R32(weapon + 0xF0) == Player());
+    if (game::Opt().no_spread && is_player && !IsShotgun(shot, weapon)) {
+        uint32_t origin_ptr = R32(ctx.esp + 4);
+        if (origin_ptr && weapon) {
+            bool ads = G<uint8_t>(weapon + 0x3C) != 0;
+            uint32_t target_ptr = weapon + (ads ? 0x20 : 0x10);
+
+            float dx = G<float>(target_ptr + 0) - G<float>(origin_ptr + 0);
+            float dy = G<float>(target_ptr + 4) - G<float>(origin_ptr + 4);
+            float dz = G<float>(target_ptr + 8) - G<float>(origin_ptr + 8);
+            float len = std::sqrt(dx * dx + dy * dy + dz * dz);
+            if (len > 0.00001f) {
+                dx /= len;
+                dy /= len;
+                dz /= len;
+                G<float>(ctx.edi + 0) = dx;
+                G<float>(ctx.edi + 4) = dy;
+                G<float>(ctx.edi + 8) = dz;
+                G<float>(ctx.edi + 12) = 0.0f;
+                ctx.esp += 8;
+                return;
+            }
+        }
+    }
+    __imp__sub_001CEF40(ctx, base);
+}
+
+// Bullet spawning: proj_def is at [shot + 0x0C], and [proj_def + 0x14] is max range (float).
+// When infinite bullet range is enabled for the player, extend max range during bullet creation
+// so raycast and ballistic distance reach targets anywhere on the map.
+X86_EXTERN_FUNC(__imp__sub_001DBD50);
+X86_FUNC(sub_001DBD50) {
+    uint32_t shot = R32(ctx.esp + 4);
+    uint32_t weapon = shot ? R32(shot + 4) : 0;
+    uint32_t owner = weapon ? R32(weapon + 0xF0) : 0;
+    bool is_player = (owner && owner == Player()) || (owner && R32(owner + kCharKind) == kPlayerKind);
+    uint32_t proj_def = (is_player && shot) ? R32(shot + 0x0C) : 0;
+    float old_range = 0.0f;
+    bool override_range = game::Opt().infinite_range && proj_def;
+    if (override_range) {
+        old_range = G<float>(proj_def + 0x14);
+        G<float>(proj_def + 0x14) = 10000.0f;
+    }
+    __imp__sub_001DBD50(ctx, base);
+    if (override_range) {
+        G<float>(proj_def + 0x14) = old_range;
+    }
+}
+
+// Projectile slot initialization:
+// [esp + 4] = shot
+// [esp + 8] = dir
+// [esp + 12] = max_range
+// [esp + 16] = speed
+// [esp + 20] = flags
+// When infinite range is enabled for player bullets, set range to 10000m and speed to 500,000 m/s
+// so bullets travel instantaneously without bullet drop or travel delay.
+X86_EXTERN_FUNC(__imp__sub_001DB7B0);
+X86_FUNC(sub_001DB7B0) {
+    uint32_t shot = R32(ctx.esp + 4);
+    uint32_t weapon = shot ? R32(shot + 4) : 0;
+    uint32_t owner = weapon ? R32(weapon + 0xF0) : 0;
+    bool is_player = (owner && owner == Player()) || (owner && R32(owner + kCharKind) == kPlayerKind);
+    if (game::Opt().infinite_range && is_player) {
+        G<float>(ctx.esp + 12) = 10000.0f;
+        G<float>(ctx.esp + 16) = 500000.0f;
+    }
+    __imp__sub_001DB7B0(ctx, base);
+}
+
+X86_EXTERN_FUNC(__imp__sub_001DB730);
+X86_FUNC(sub_001DB730) {
+    uint32_t shot = R32(ctx.esp + 4);
+    uint32_t weapon = shot ? R32(shot + 4) : 0;
+    uint32_t owner = weapon ? R32(weapon + 0xF0) : 0;
+    bool is_player = (owner && owner == Player()) || (owner && R32(owner + kCharKind) == kPlayerKind);
+    if (game::Opt().infinite_range && is_player) {
+        G<float>(ctx.esp + 12) = 10000.0f;
+        G<float>(ctx.esp + 16) = 500000.0f;
+    }
+    __imp__sub_001DB730(ctx, base);
+}
+
+
+
+
+

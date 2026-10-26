@@ -190,12 +190,14 @@ int OptionRow(const char* label, const char* value) {
     RowBox box = MeasureRow();
     ImGui::PushID(label);
     int step = 0;
-    ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(box.row_w, box.row_h));
+    bool clicked = ImGui::Selectable("##row", false, ImGuiSelectableFlags_AllowOverlap, ImVec2(box.row_w, box.row_h));
     if (ImGui::IsItemFocused()) {
         FillItem();
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft)) step = -1;
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight)) step = 1;
+        if (ImGui::IsKeyPressed(ImGuiKey_Enter) || ImGui::IsKeyPressed(ImGuiKey_Space) || ImGui::IsKeyPressed(ImGuiKey_GamepadFaceDown)) step = 1;
     }
+    if (clicked) step = 1;
     RowLabel(box, label);
     ImGui::PushItemFlag(ImGuiItemFlags_NoNav | ImGuiItemFlags_ButtonRepeat, true);  // held arrows keep stepping
     float block_x = box.row_x + box.row_w - box.block_w;
@@ -233,7 +235,7 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
              kPauseOnFocusLoss, kFmvScale,
              kControllerHoldAim, kControllerSensitivity, kRumbleIntensity, kMenuAnimations,
              kGyroAiming, kGyroSensitivity, kAimAssist,
-             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kGodMode, kOneHitKill,
+             kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kNoSpread, kInfiniteRange, kGodMode, kOneHitKill,
              kEsp, kAimbot, kGameSpeed, kUnlockLevels, kUnlockBlackOps };
 
 using rows::Kind;
@@ -245,6 +247,8 @@ constexpr Row kCheatRows[] = {
     {Kind::Value, kInfiniteGrenades, "INFINITE GRENADES"},
     {Kind::Value, kRapidFire, "RAPID FIRE"},
     {Kind::Value, kNoRecoil, "NO RECOIL"},
+    {Kind::Value, kNoSpread, "NO SPREAD"},
+    {Kind::Value, kInfiniteRange, "INFINITE RANGE"},
     {Kind::Heading, -1, "PLAYER"},
     {Kind::Value, kGodMode, "GOD MODE"},
     {Kind::Value, kOneHitKill, "ONE-HIT KILL"},
@@ -329,6 +333,8 @@ bool* ToggleFlag(Settings& s, int id) {
         case kAimAssist: return &o.aim_assist;
         case kInfiniteAmmo: return &o.infinite_ammo;
         case kNoRecoil: return &o.no_recoil;
+        case kNoSpread: return &o.no_spread;
+        case kInfiniteRange: return &o.infinite_range;
         case kGodMode: return &o.god_mode;
         case kOneHitKill: return &o.one_hit_kill;
         case kInfiniteGrenades: return &o.infinite_grenades;
@@ -620,6 +626,8 @@ void RestoreDefaults(int page) {
         o.infinite_ammo = false;
         o.rapid_fire = 1;
         o.no_recoil = false;
+        o.no_spread = false;
+        o.infinite_range = false;
         o.game_speed = 100;
         o.god_mode = false;
         o.one_hit_kill = false;

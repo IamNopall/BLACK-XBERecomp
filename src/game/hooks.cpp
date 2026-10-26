@@ -378,6 +378,12 @@ X86_FUNC(sub_001EEFD0) {
     // the rapid fire cheat: a shot's wait, its fire mode's +0x20, is that many times shorter
     uint32_t faster = std::clamp(game::Opt().rapid_fire, 1u, 4u);
     if (shot && me == Player() && wait > 0) wait /= float(faster);
+    if (!game::Opt().no_spread && me == Player()) {
+        if (G<float>(weapon + 0xE4) <= 0.0f) {
+            G<float>(weapon + 0xE0) = 0.25f;
+            G<float>(weapon + 0xE4) = 25.0f;
+        }
+    }
     if (me == Player()) {
         if (R32(weapon + kWeaponState) != 1 || wait != rest) g_idle_early = false;
         else if (g_idle_early) W32(me + kPlayerFireRequest, 0);  // the fire request is spent, as on the console
