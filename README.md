@@ -56,6 +56,7 @@ Built-in cheats accessible through the in-game options menu and the F10 overlay:
 - **Player**
   - **God Mode** - Complete invulnerability with continuous full health.
   - **One-Hit Kill** - Any bullet hit from the player instantly eliminates the target.
+  - **Noclip** - Fly freely through walls and level geometry in 3D. Control with WASD (move relative to view), Space (ascend), Crouch/Ctrl (descend), and Shift (boost speed).
   - **ESP Lines** - Tactical visual overlay showing directional snaplines, bounding boxes, and head indicators for living enemies.
   - **Aimbot** - Automatically tracks and aligns the aim to the nearest enemy while aiming down sights (ADS).
 - **Game & Progression**

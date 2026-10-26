@@ -30,6 +30,7 @@ constexpr Entry kEntries[] = {
     {"ONE-HIT KILL", {u"Mort en un coup", u"Ein-Treffer-Kill", u"Uccisione con un colpo", u"Muerte de un golpe"}},
     {"ESP LINES", {u"Lignes ESP", u"ESP-Linien", u"Linee ESP", u"Líneas ESP"}},
     {"AIMBOT (WHILE AIMING IN)", {u"Visée automatique (en visant)", u"Zielhilfe (beim Zielen)", u"Mira automatica (mirando)", u"Apuntado automático (al apuntar)"}},
+    {"NOCLIP (FLY THROUGH WALLS)", {u"Passe-muraille (voler)", u"Noclip (durch Wände fliegen)", u"Noclip (vola attraverso i muri)", u"Noclip (volar a través de paredes)"}},
     {"GAME SPEED", {u"Vitesse du jeu", u"Spielgeschwindigkeit", u"Velocità di gioco", u"Velocidad del juego"}},
     {"UNLOCK ALL MISSIONS", {u"Débloquer toutes les missions", u"Alle Missionen freischalten", u"Sblocca toutes le missioni", u"Desbloquear todas las misiones"}},
     {"UNLOCK BLACK OPS", {u"Débloquer Black Ops", u"Black Ops freischalten", u"Sblocca Black Ops", u"Desbloquear Black Ops"}},

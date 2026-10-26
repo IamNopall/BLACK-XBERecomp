@@ -1,9 +1,17 @@
-// The cheats page's god mode, one-hit kill and infinite grenades. The rest live where the game
-// already has a hook: infinite ammo, rapid fire and no recoil with the weapon's, game speed with the frame time
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <algorithm>
 #include <cmath>
 #include <string>
 
+#include "app/app.h"
+#include "common/menu.h"
 #include "common/options.h"
 #include "game/layout.h"
 #include "xdk/hle.h"
@@ -15,9 +23,13 @@ namespace {
 
 // character: the player is the one in the world container, its kind 2
 constexpr uint32_t kCharKind = 0xC4;
-constexpr uint32_t kCharGrenades = 0x286;  // uint16
-constexpr uint32_t kCharHealth = 0x2F0;    // float, the difficulty's full at most
-constexpr uint32_t kCharDying = 0x384;     // not 0 once it is killed
+constexpr uint32_t kCharPosition = 0xA0;       // float[3] x, y, z
+constexpr uint32_t kCharForward = 0xF0;        // float[3] fx, fy, fz (camera forward vector)
+constexpr uint32_t kCharPrevPos = 0x190;       // float[3] px, py, pz
+constexpr uint32_t kCharVelocity = 0x1B0;      // float[3] vx, vy, vz
+constexpr uint32_t kCharGrenades = 0x286;      // uint16
+constexpr uint32_t kCharHealth = 0x2F0;        // float, the difficulty's full at most
+constexpr uint32_t kCharDying = 0x384;         // not 0 once it is killed
 // byte the scripts set: the player's damage calls (its class's 0x1ED990, 0x1ED700, 0x1ED2B0, 0x1ED5D0, and
 // 0x1ED1E0) take nothing while it is
 constexpr uint32_t kCharInvulnerable = 0x8F2;
@@ -99,22 +111,133 @@ bool IsShotgun(uint32_t shot, uint32_t weapon) {
 }  // namespace
 
 // The player's update, a frame (ecx the player, its class's own): god mode fills the health and holds the flag
-// its damage calls test
+// its damage calls test; noclip enables full 3D flight with WASD, Space (up) and Crouch (down)
+static bool s_noclip_active = false;
+static float s_noclip_pos[3] = {};
+static uint32_t s_last_player = 0;
+
 X86_EXTERN_FUNC(__imp__sub_001E5FA0);
 X86_FUNC(sub_001E5FA0) {
     uint32_t me = ctx.ecx;
-    if (me && me == Player() && R32(me + kCharKind) == kPlayerKind) {
-        if (game::Opt().god_mode && !R32(me + kCharDying)) {
+    bool is_player = me && me == Player() && R32(me + kCharKind) == kPlayerKind;
+    bool is_noclip = is_player && game::Opt().noclip && !R32(me + kCharDying);
+
+    if (is_player) {
+        if ((game::Opt().god_mode || is_noclip) && !R32(me + kCharDying)) {
             float& health = G<float>(me + kCharHealth);
             health = std::max(health, FullHealth());
             G<uint8_t>(me + kCharInvulnerable) = 1;
             g_invulnerable = true;
-        } else if (g_invulnerable) {
+        } else if (g_invulnerable && !game::Opt().god_mode && !is_noclip) {
             G<uint8_t>(me + kCharInvulnerable) = 0;
             g_invulnerable = false;
         }
+
+        if (is_noclip) {
+            if (!s_noclip_active || s_last_player != me) {
+                s_noclip_pos[0] = G<float>(me + kCharPosition + 0);
+                s_noclip_pos[1] = G<float>(me + kCharPosition + 4);
+                s_noclip_pos[2] = G<float>(me + kCharPosition + 8);
+
+                s_noclip_active = true;
+                s_last_player = me;
+            }
+
+            HWND hwnd = static_cast<HWND>(app::Window());
+            bool focused = hwnd && (GetForegroundWindow() == hwnd) && !app::MenuOpen();
+
+            if (focused) {
+                uint32_t world = R32(kWorld);
+                float dt = world ? G<float>(world + kTimerDt) : 0.016666f;
+                if (dt <= 0.0f || dt > 0.1f) dt = 0.016666f;
+
+                // Camera Forward vector (fx, fy, fz)
+                float fx = G<float>(me + kCharForward + 0);
+                float fy = G<float>(me + kCharForward + 4);
+                float fz = G<float>(me + kCharForward + 8);
+                float flen = std::sqrt(fx * fx + fy * fy + fz * fz);
+                if (flen > 0.0001f) {
+                    fx /= flen; fy /= flen; fz /= flen;
+                }
+
+                // Camera Right / Strafe vector (rx, ry, rz): cross product of forward with world UP (0, 1, 0)
+                float rx = -fz;
+                float ry = 0.0f;
+                float rz = fx;
+                float rlen = std::sqrt(rx * rx + rz * rz);
+                if (rlen > 0.0001f) {
+                    rx /= rlen; rz /= rlen;
+                }
+
+                // Keys: WASD, Space (up), Crouch (C or Left Ctrl: down), Shift (speed boost)
+                bool key_w = (GetAsyncKeyState('W') & 0x8000) != 0 || (GetAsyncKeyState(VK_UP) & 0x8000) != 0;
+                bool key_s = (GetAsyncKeyState('S') & 0x8000) != 0 || (GetAsyncKeyState(VK_DOWN) & 0x8000) != 0;
+                bool key_a = (GetAsyncKeyState('A') & 0x8000) != 0 || (GetAsyncKeyState(VK_LEFT) & 0x8000) != 0;
+                bool key_d = (GetAsyncKeyState('D') & 0x8000) != 0 || (GetAsyncKeyState(VK_RIGHT) & 0x8000) != 0;
+                bool key_space = (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+                bool key_crouch = (GetAsyncKeyState('C') & 0x8000) != 0 || (GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0;
+                bool key_boost = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+
+                float move[3] = {0.0f, 0.0f, 0.0f};
+
+                // Forward / Backward along 3D camera look direction
+                if (key_w) { move[0] += fx; move[1] += fy; move[2] += fz; }
+                if (key_s) { move[0] -= fx; move[1] -= fy; move[2] -= fz; }
+
+                // Strafe Left / Right
+                if (key_d) { move[0] += rx; move[1] += ry; move[2] += rz; }
+                if (key_a) { move[0] -= rx; move[1] -= ry; move[2] -= rz; }
+
+                // Vertical: Space for UP, Crouch for DOWN
+                if (key_space) { move[1] += 1.0f; }
+                if (key_crouch) { move[1] -= 1.0f; }
+
+                float mlen = std::sqrt(move[0] * move[0] + move[1] * move[1] + move[2] * move[2]);
+                if (mlen > 0.0001f) {
+                    move[0] /= mlen;
+                    move[1] /= mlen;
+                    move[2] /= mlen;
+
+                    float speed = key_boost ? 35.0f : 15.0f;
+                    s_noclip_pos[0] += move[0] * speed * dt;
+                    s_noclip_pos[1] += move[1] * speed * dt;
+                    s_noclip_pos[2] += move[2] * speed * dt;
+                }
+            }
+
+            // Sync coordinates before guest player update
+            G<float>(me + kCharPosition + 0) = s_noclip_pos[0];
+            G<float>(me + kCharPosition + 4) = s_noclip_pos[1];
+            G<float>(me + kCharPosition + 8) = s_noclip_pos[2];
+
+            G<float>(me + kCharPrevPos + 0) = s_noclip_pos[0];
+            G<float>(me + kCharPrevPos + 4) = s_noclip_pos[1];
+            G<float>(me + kCharPrevPos + 8) = s_noclip_pos[2];
+
+            G<float>(me + kCharVelocity + 0) = 0.0f;
+            G<float>(me + kCharVelocity + 4) = 0.0f;
+            G<float>(me + kCharVelocity + 8) = 0.0f;
+        } else {
+            s_noclip_active = false;
+        }
     }
+
     __imp__sub_001E5FA0(ctx, base);
+
+    // Overwrite position after guest update so collisions and gravity never pull or displace the player
+    if (is_noclip && me && me == Player() && !R32(me + kCharDying)) {
+        G<float>(me + kCharPosition + 0) = s_noclip_pos[0];
+        G<float>(me + kCharPosition + 4) = s_noclip_pos[1];
+        G<float>(me + kCharPosition + 8) = s_noclip_pos[2];
+
+        G<float>(me + kCharPrevPos + 0) = s_noclip_pos[0];
+        G<float>(me + kCharPrevPos + 4) = s_noclip_pos[1];
+        G<float>(me + kCharPrevPos + 8) = s_noclip_pos[2];
+
+        G<float>(me + kCharVelocity + 0) = 0.0f;
+        G<float>(me + kCharVelocity + 4) = 0.0f;
+        G<float>(me + kCharVelocity + 8) = 0.0f;
+    }
 }
 
 // A soldier takes a bullet (ecx the victim, the sixth of seven arguments its attacker, ret 0x1C): the

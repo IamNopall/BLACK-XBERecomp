@@ -115,6 +115,11 @@ void Pad(int port, input::Pad& pad) {
     if (port == 0) pad.connected = true;
     if (app::MenuOpen()) pad = input::Pad{.connected = pad.connected};
     else if (port == 0) input::Keyboard(pad);
+    if (game::Opt().noclip && port == 0) {
+        pad.lx = 0;
+        pad.ly = 0;
+        pad.buttons &= ~uint16_t(1u << (14 - 8));  // suppress crouch stance toggle during noclip
+    }
 }
 
 // the vibration at the rumble intensity, none while the keyboard and mouse are in use
@@ -231,7 +236,8 @@ const app::GameInfo app::kGame = {
                 {"unlock_levels", &game::Opt().unlock_levels, nullptr},
                 {"unlock_black_ops", &game::Opt().unlock_black_ops, nullptr},
                 {"esp", &game::Opt().esp, nullptr},
-                {"aimbot", &game::Opt().aimbot, nullptr}},
+                {"aimbot", &game::Opt().aimbot, nullptr},
+                {"noclip", &game::Opt().noclip, nullptr}},
     .load = game::Load,
     .save = game::Save,
     .init = game::Init,

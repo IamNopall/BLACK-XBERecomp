@@ -236,7 +236,7 @@ enum RowId { kDisplayMode, kResolution, kRenderResolution, kMaxFps, kVsync, kFps
              kControllerHoldAim, kControllerSensitivity, kRumbleIntensity, kMenuAnimations,
              kGyroAiming, kGyroSensitivity, kAimAssist,
              kInfiniteAmmo, kInfiniteGrenades, kRapidFire, kNoRecoil, kNoSpread, kInfiniteRange, kGodMode, kOneHitKill,
-             kEsp, kAimbot, kGameSpeed, kUnlockLevels, kUnlockBlackOps };
+             kEsp, kAimbot, kNoclip, kGameSpeed, kUnlockLevels, kUnlockBlackOps };
 
 using rows::Kind;
 using rows::Row;
@@ -252,6 +252,7 @@ constexpr Row kCheatRows[] = {
     {Kind::Heading, -1, "PLAYER"},
     {Kind::Value, kGodMode, "GOD MODE"},
     {Kind::Value, kOneHitKill, "ONE-HIT KILL"},
+    {Kind::Value, kNoclip, "NOCLIP (FLY THROUGH WALLS)"},
     {Kind::Value, kEsp, "ESP LINES"},
     {Kind::Value, kAimbot, "AIMBOT (WHILE AIMING IN)"},
     {Kind::Heading, -1, "GAME"},
@@ -342,6 +343,7 @@ bool* ToggleFlag(Settings& s, int id) {
         case kUnlockBlackOps: return &o.unlock_black_ops;
         case kEsp: return &o.esp;
         case kAimbot: return &o.aimbot;
+        case kNoclip: return &o.noclip;
         default: return nullptr;
     }
 }
@@ -636,6 +638,7 @@ void RestoreDefaults(int page) {
         o.unlock_black_ops = false;
         o.esp = false;
         o.aimbot = false;
+        o.noclip = false;
         Save();
         return;
     }
